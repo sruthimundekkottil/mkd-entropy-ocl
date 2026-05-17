@@ -55,13 +55,13 @@ class ER_EMA_EntropyLearner(ER_EMALearner):
     """
 
     def __init__(self, args):
-        super().__init__(args)
-
-        # Whether to use entropy-guided retrieval (our contribution A)
+        # These flags must exist before ER_EMALearner.__init__ runs:
+        # the parent constructor calls self.update_ema(init=True), which
+        # dispatches to this subclass override.
         self.entropy_retrieval = getattr(args, 'entropy_retrieval', True)
-
-        # Whether to randomise EMA alpha (our contribution B)
         self.stochastic_alpha = getattr(args, 'stochastic_alpha', False)
+
+        super().__init__(args)
 
         # Replace the buffer only if entropy retrieval is on
         if self.entropy_retrieval:
@@ -114,9 +114,7 @@ class ER_EMA_EntropyLearner(ER_EMALearner):
             ):
                 p = deepcopy(param.data.detach())
                 if init:
-                    ema_param.data.mul_(0).add_(
-                        p * alpha / (1 - alpha ** correction)
-                    )
+                    ema_param.data.copy_(p)
                 else:
                     ema_param.data.mul_(1 - alpha).add_(
                         p * alpha / (1 - alpha ** correction)
@@ -128,32 +126,31 @@ class ER_EMA_EntropyLearner(ER_EMALearner):
 
     def train(self, dataloader, **kwargs):
         task_name = kwargs.get("task_name", "Unknown")
-        task_id   = kwargs.get('task_id', None)
+        task_id = kwargs.get('task_id', None)
         self.model = self.model.train()
 
         for j, batch in enumerate(dataloader):
-            with torch.autocast(
-                device_type='cuda', dtype=torch.float16, enabled=True
-            ):
-                batch_x, batch_y = batch[0], batch[1]
-                self.stream_idx += len(batch_x)
+            batch_x, batch_y = batch[0], batch[1]
+            self.stream_idx += len(batch_x)
 
-                for _ in range(self.params.mem_iters):
+            for _ in range(self.params.mem_iters):
+                # Entropy scoring is inference-only. Keep it out of the
+                # training autocast context used by the MKD optimization step.
+                if self.entropy_retrieval:
+                    mem_x, mem_y = self.buffer.entropy_retrieve(
+                        n_imgs=self.params.mem_batch_size,
+                        model=self.model,
+                        transform=self.transform_test,
+                    )
+                else:
+                    mem_x, mem_y = self.buffer.random_retrieve(
+                        n_imgs=self.params.mem_batch_size
+                    )
 
-                    # ── KEY CHANGE: entropy vs random retrieval ────────
-                    if self.entropy_retrieval:
-                        mem_x, mem_y = self.buffer.entropy_retrieve(
-                            n_imgs=self.params.mem_batch_size,
-                            model=self.model,
-                            transform=self.transform_test,
-                        )
-                    else:
-                        mem_x, mem_y = self.buffer.random_retrieve(
-                            n_imgs=self.params.mem_batch_size
-                        )
-                    # ──────────────────────────────────────────────────
-
-                    if mem_x.size(0) > 0:
+                if mem_x.size(0) > 0:
+                    with torch.autocast(
+                        device_type='cuda', dtype=torch.float16, enabled=True
+                    ):
                         combined_x = torch.cat(
                             [mem_x, batch_x]
                         ).to(device)
@@ -163,7 +160,7 @@ class ER_EMA_EntropyLearner(ER_EMALearner):
 
                         combined_aug = self.transform_train(combined_x)
 
-                        logits_stu     = self.model.logits(combined_aug)
+                        logits_stu = self.model.logits(combined_aug)
                         logits_stu_raw = self.model.logits(combined_x)
 
                         # MKD distillation loss over all teachers
@@ -192,52 +189,52 @@ class ER_EMA_EntropyLearner(ER_EMALearner):
                             self.params.kd_lambda * loss_dist + loss_ce
                         ).mean()
 
-                        self.loss = loss.item()
+                    self.loss = loss.item()
 
-                        with torch.autocast(
-                            device_type='cuda',
-                            dtype=torch.float16,
-                            enabled=False
-                        ):
-                            scaler.scale(loss).backward()
-                            scaler.step(self.optim)
-                            scaler.update()
+                    with torch.autocast(
+                        device_type='cuda',
+                        dtype=torch.float16,
+                        enabled=False
+                    ):
+                        scaler.scale(loss).backward()
+                        scaler.step(self.optim)
+                        scaler.update()
 
-                        # EMA update (may use stochastic alpha)
-                        self.update_ema()
+                    # EMA update (may use stochastic alpha)
+                    self.update_ema()
 
-                        if self.params.annealing:
-                            self.scheduler.step()
-                        self.optim.zero_grad()
+                    if self.params.annealing:
+                        self.scheduler.step()
+                    self.optim.zero_grad()
 
-                        if (
-                            self.params.measure_drift >= 0 and
-                            task_id > 0
-                        ):
-                            self.measure_drift(task_id)
+                    if (
+                        self.params.measure_drift >= 0 and
+                        task_id > 0
+                    ):
+                        self.measure_drift(task_id)
 
-                        if not self.params.no_wandb:
-                            wandb.log({
-                                "loss_dist": loss_dist.item(),
-                                "loss":      loss.item(),
-                            })
+                    if not self.params.no_wandb:
+                        wandb.log({
+                            "loss_dist": loss_dist.item(),
+                            "loss": loss.item(),
+                        })
 
-                        print(
-                            f"Phase: {task_name}  "
-                            f"Loss:{loss.item():.3f}  "
-                            f"Loss dist:{loss_dist.item():.3f}  "
-                            f"batch {j}",
-                            end="\r"
-                        )
-
-                self.buffer.update(imgs=batch_x, labels=batch_y)
-
-                if (j == (len(dataloader) - 1)) and (j > 0):
                     print(
                         f"Phase: {task_name}  "
-                        f"batch {j}/{len(dataloader)}  "
-                        f"Loss: {self.loss:.4f}  "
-                        f"Time: {time.time() - self.start:.4f}s",
+                        f"Loss:{loss.item():.3f}  "
+                        f"Loss dist:{loss_dist.item():.3f}  "
+                        f"batch {j}",
                         end="\r"
                     )
-                    self.save(model_name=f"ckpt_{task_name}.pth")
+
+            self.buffer.update(imgs=batch_x, labels=batch_y)
+
+            if (j == (len(dataloader) - 1)) and (j > 0):
+                print(
+                    f"Phase: {task_name}  "
+                    f"batch {j}/{len(dataloader)}  "
+                    f"Loss: {self.loss:.4f}  "
+                    f"Time: {time.time() - self.start:.4f}s",
+                    end="\r"
+                )
+                self.save(model_name=f"ckpt_{task_name}.pth")

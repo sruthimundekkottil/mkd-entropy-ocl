@@ -95,10 +95,14 @@ class EntropyReservoir(Reservoir):
         n_available = min(self.n_added_so_far, self.max_size)
 
         # Not enough data or no model → random fallback
-        if n_available < n_imgs or model is None:
+        min_entropy_buffer = min(
+            self.max_size,
+            max(n_imgs * 5, int(0.5 * self.max_size))
+        )
+        if n_available < min_entropy_buffer or model is None:
             lg.debug(
                 f"EntropyReservoir: falling back to random retrieve "
-                f"({n_available} available, {n_imgs} requested)"
+                f"({n_available} available, {min_entropy_buffer} needed)"
             )
             return self.random_retrieve(n_imgs)
 
@@ -106,21 +110,70 @@ class EntropyReservoir(Reservoir):
         all_imgs   = self.buffer_imgs[:n_available].to(device)
         all_labels = self.buffer_labels[:n_available]
 
+        was_training = model.training
         model.eval()
         with torch.no_grad():
             imgs_input = transform(all_imgs) if transform is not None \
                          else all_imgs
-            logits = model.logits(imgs_input)          # (N, C)
-            entropies = softmax_entropy(logits)        # (N,)
-        model.train()
+            with torch.autocast(device_type=imgs_input.device.type, enabled=False):
+                logits = model.logits(imgs_input.float())  # (N, C)
+                entropies = softmax_entropy(logits)        # (N,)
+        model.train(was_training)
 
-        # Pick top-n_imgs by highest entropy
-        _, top_idx = entropies.topk(n_imgs, largest=True, sorted=False)
-        top_idx = top_idx.cpu()
+        # Keep entropy guidance without replaying the exact same top-n samples
+        # on every iteration.
+        candidate_size = min(n_available, n_imgs * 3)
+        _, candidate_idx = entropies.topk(
+            candidate_size, largest=True, sorted=False
+        )
+        chosen = torch.randperm(candidate_size, device=candidate_idx.device)[:n_imgs]
+        top_idx = candidate_idx[chosen].cpu()
 
         return (
             self.buffer_imgs[top_idx].clone(),
             self.buffer_labels[top_idx].clone()
+        )
+
+    def hybrid_retrieve(self, n_imgs: int, model, transform=None,
+                        random_ratio: float = 0.5):
+        """
+        Retrieve a mixed replay batch: part uniform random, part
+        entropy-guided, with no duplicate buffer indices.
+        """
+        n_available = min(self.n_added_so_far, self.max_size)
+        if n_available == 0:
+            return self.random_retrieve(n_imgs)
+
+        n_random = min(n_available, int(round(n_imgs * random_ratio)))
+        n_entropy = min(n_imgs - n_random, n_available - n_random)
+
+        all_idx = torch.randperm(n_available)
+        random_idx = all_idx[:n_random]
+        remaining_idx = all_idx[n_random:]
+
+        if n_entropy <= 0 or model is None:
+            selected_idx = random_idx
+        else:
+            imgs = self.buffer_imgs[remaining_idx].to(device)
+            was_training = model.training
+            model.eval()
+            with torch.no_grad():
+                imgs_input = transform(imgs) if transform is not None else imgs
+                with torch.autocast(device_type=imgs_input.device.type,
+                                    enabled=False):
+                    logits = model.logits(imgs_input.float())
+                    entropies = softmax_entropy(logits)
+            model.train(was_training)
+
+            entropy_pos = entropies.topk(
+                n_entropy, largest=True, sorted=False
+            ).indices.cpu()
+            entropy_idx = remaining_idx[entropy_pos]
+            selected_idx = torch.cat([random_idx, entropy_idx], dim=0)
+
+        return (
+            self.buffer_imgs[selected_idx].clone(),
+            self.buffer_labels[selected_idx].clone()
         )
 
     # ------------------------------------------------------------------

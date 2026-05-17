@@ -50,10 +50,11 @@ class ER_EntropyLearner(ERLearner):
 
             for _ in range(self.params.mem_iters):
                 # ── KEY CHANGE: entropy-ranked retrieval ──────────────
-                mem_x, mem_y = self.buffer.entropy_retrieve(
+                mem_x, mem_y = self.buffer.hybrid_retrieve(
                     n_imgs=self.params.mem_batch_size,
                     model=self.model,
                     transform=self.transform_test,
+                    random_ratio=0.5,
                 )
                 # ─────────────────────────────────────────────────────
 
