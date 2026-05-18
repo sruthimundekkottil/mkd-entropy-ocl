@@ -8,8 +8,8 @@ Methods compared
 1. ER            — vanilla Experience Replay (baseline)
 2. EWC           — Elastic Weight Consolidation (Kirkpatrick et al. 2017)
 3. VR_OCL        — Variance Regularizer, fixed mu  (ours)
-4. VR_OCL_Decay  — Variance Regularizer, decaying mu (ours, from paper schedule)
-
+4. VR_OCL_Decay  — Variance Regularizer, decaying mu ( from paper random scheduling)
+5. VR_OCL_Adaptive — Variance Regularizer, adaptive mu (ours, new)
 Usage (Kaggle / Colab notebook cell):
     exec(open('run_vrocl.py').read())
 
@@ -18,6 +18,7 @@ Or as script:
 """
 
 import os, sys, random, warnings
+from certifi.__main__ import args
 import numpy as np
 import pandas as pd
 import torch
@@ -33,7 +34,7 @@ from config.parser import Parser
 # SETTINGS
 # ═════════════════════════════════════════════════════════════════════
 N_RUNS   = 3
-MEM_SIZE = 200     # larger than before — gives methods a fair chance
+MEM_SIZE = 1000
 DATASET  = 'cifar10'
 N_TASKS  = 5
 EPOCHS   = 1       # OCL standard: 1 pass per task
@@ -43,17 +44,18 @@ METHODS  = [
     'EWC',
     'VR_OCL',
     'VR_OCL_Decay',
+    'VR_OCL_Adaptive',
 ]
 
-# VR-OCL hyperparameters — tune these if needed
-VR_MU        = 0.1    # base regularization strength
+# VR-OCL hyperparameters for final mem=1000 benchmark
+VR_MU        = 0.001  # base regularization strength
 VR_BETA      = 0.99   # decay base (β in the paper)
-VR_MU_CAP   = 10.0   # maximum mu for decay variant
+VR_MU_CAP   = 0.05   # maximum mu for decay variant
 
 # EWC hyperparameters
 EWC_LAMBDA   = 1.0
 
-RESULTS_ROOT = './results_vrocl'
+RESULTS_ROOT = '/kaggle/working/final_mem1000_mu0001'
 # ═════════════════════════════════════════════════════════════════════
 
 
@@ -84,7 +86,12 @@ def make_args(learner_name, seed):
     args.vr_mu     = VR_MU
     args.vr_beta   = VR_BETA
     args.vr_mu_cap = VR_MU_CAP
+    
+    args.vr_mu_max   = 0.05
+    args.vr_tau      = 0.5
+    args.vr_ema_beta = 0.9
 
+    
     # EWC params
     args.ewc_lambda = EWC_LAMBDA
     args.ewc_online = True
@@ -105,6 +112,13 @@ def run_one(learner_name, seed):
         torch.backends.cudnn.deterministic = True
 
     args    = make_args(learner_name, seed)
+    run_dir = os.path.join(args.results_root, args.tag, f"run{args.seed}")
+    print(f"  Output directory: {run_dir}")
+    if learner_name in ('VR_OCL', 'VR_OCL_Decay'):
+        print(
+            f"  VR params: vr_mu={args.vr_mu}  "
+            f"vr_beta={args.vr_beta}  vr_mu_cap={args.vr_mu_cap}"
+        )
     learner = name_match.learners[learner_name](args)
     loaders = get_loaders(args)
 
@@ -136,7 +150,12 @@ def run_one(learner_name, seed):
 
 
 def main():
+    if os.path.exists(RESULTS_ROOT) and os.listdir(RESULTS_ROOT):
+        raise FileExistsError(
+            f"Refusing to overwrite existing results directory: {RESULTS_ROOT}"
+        )
     os.makedirs(RESULTS_ROOT, exist_ok=True)
+    print(f"Benchmark output root: {RESULTS_ROOT}")
 
     all_results = []
 
@@ -174,7 +193,9 @@ def main():
         fgt_std=('fgt', 'std'),
     ).round(4)
     print(summary.to_string())
-    summary.to_csv(os.path.join(RESULTS_ROOT, 'summary.csv'))
+    final_summary_path = os.path.join(RESULTS_ROOT, 'final_summary.csv')
+    summary.to_csv(final_summary_path)
+    print(f"Final summary saved to: {final_summary_path}")
 
     return df
 
