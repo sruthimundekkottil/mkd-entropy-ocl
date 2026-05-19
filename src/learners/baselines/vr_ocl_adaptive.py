@@ -46,6 +46,7 @@ class VROCLAdaptiveLearner(VROCLLearner):
         self.vr_mu_max   = getattr(args, 'vr_mu_max',   0.05)
         self.vr_tau      = getattr(args, 'vr_tau',      0.5)
         self.vr_ema_beta = getattr(args, 'vr_ema_beta', 0.9)
+        self.vr_debug_steps = getattr(args, 'vr_debug_steps', 5)
 
         self.gap_ema     = 0.0
         self.gap_history = []
