@@ -28,8 +28,8 @@ from src.learners.ema.er_ema_entropy import ER_EMA_EntropyLearner
 from src.learners.baselines.vr_ocl import (
     VROCLLearner,
     VROCLDecayLearner,
-    VROCLAdaptiveLearner
 )
+from src.learners.baselines.vr_ocl_adaptive import VROCLAdaptiveLearner
 from src.learners.baselines.ewc import EWCLearner
 # ────────────────────────────────────────────────────────────────────
 
