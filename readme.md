@@ -1,3 +1,66 @@
+# VR-OCL: Variance-Regularized Online Continual Learning (fork of MKD-OCL)
+
+This fork adds VR-OCL, an M.Sc. mini-project (Kerala University of Digital Sciences, Innovation and Technology, 2026), to the MKD-OCL codebase. VR-OCL is Experience Replay plus a penalty (μ/2)·‖θ − θ_task-start‖² on parameter drift, motivated by Lemma 3.2 of Zhang & Cutkosky (ICML 2024). The M.Sc. report is not published in this repository; corrections to it are in `docs/report_errata.md`.
+
+## Credit and license
+
+All code outside the files listed below is by **Nicolas Michel, Maorong Wang, Ling Xiao and Toshihiko Yamasaki**, from [github.com/Nicolas1203/mkd_ocl](https://github.com/Nicolas1203/mkd_ocl). It is the code for "Rethinking Momentum Knowledge Distillation in Online Continual Learning" (ICML 2024), and their original README follows below. Please cite their paper if you use this code. The upstream repository has **no license file**, so all rights to the upstream code remain with its authors.
+
+Files added or changed in this fork (535 other files are byte-identical to upstream):
+
+| File | What it is |
+|---|---|
+| `src/learners/baselines/vr_ocl.py` | VR-OCL with fixed μ (`VR_OCL`) and the within-task growing schedule (`VR_OCL_Decay`) |
+| `src/learners/baselines/vr_ocl_adaptive.py` | VR-OCL with μ set from an online accuracy-gap signal (`VR_OCL_Adaptive`) |
+| `src/learners/baselines/ewc.py` | Online EWC + replay baseline |
+| `src/utils/name_match.py` | *modified:* registers the learners above (marked block) |
+| `scripts/run_vrocl.py` | runs any of the methods; every setting is a flag |
+| `scripts/make_report_tables.py` | builds all tables from saved result files |
+| `generate_figures.py` | draws the figures from those tables |
+| `results/` | saved local results (`local/`), `manifest.csv`, `PROVENANCE.md`, and archived Kaggle runs (`archive_kaggle/`, not used in the headline results) |
+| `docs/` | corrections to the M.Sc. report (`report_errata.md`) and the generated tables |
+| `experimental/` | an unfinished, unrelated idea (entropy-guided replay); not part of the report |
+
+The Kaggle notebooks behind the archived runs are kept privately by the author and are not in this repository.
+
+## Setup
+
+- Python 3.10–3.12. `torch==2.6.0` has no wheels for newer Python versions. A CUDA GPU is strongly recommended, since each run trains a ResNet-18 for 5 tasks.
+- `pip install -r requirements.txt` installs the upstream pinned environment. `wandb` is imported unconditionally, so it must be installed even though every command here passes `--no-wandb`.
+- CIFAR-10 is downloaded automatically into `./data/`, which git ignores.
+
+## Reproducing
+
+```bash
+# Rebuild every table and figure from the saved results (no training)
+python scripts/make_report_tables.py     # -> results/tables/, docs/results_tables.md (+ archive table)
+python generate_figures.py               # -> report_figures/
+
+# Re-run experiments (writes a new folder; never overwrites without --overwrite)
+python scripts/run_vrocl.py --methods ER EWC --out results/local/new_baselines
+python scripts/run_vrocl.py --methods VR_OCL VR_OCL_Decay --vr-mu 0.0005 --out results/local/new_vr_mu0p0005
+python scripts/run_vrocl.py --methods VR_OCL_Adaptive --vr-mu-max 0.02 --vr-tau 0.5 --out results/local/new_adaptive
+
+# Quick check that everything runs (5 batches per task, one seed)
+python scripts/run_vrocl.py --methods ER VR_OCL --seeds 0 --max-batches 5 --out results/smoke --overwrite
+```
+
+The defaults match the saved runs: memory 500, Adam lr 0.0005, ResNet-18 width 20, stream batch 10, memory batch 64, 1 epoch per task, and seeds 0 1 2. To include a new folder in the tables, add it to `results/manifest.csv` with status `valid`.
+
+## Results so far (local runs, Split CIFAR-10, memory 500, 3 seeds)
+
+Full tables, with per-seed differences from ER, are in `docs/results_tables.md`.
+
+- Fixed VR-OCL (μ = 0.0005) and ER have about the same mean average incremental accuracy (70.71 ± 2.57 vs 70.38 ± 2.72). Mean average incremental forgetting is lower for VR-OCL (20.22 ± 4.75 vs 24.79 ± 3.50), but the spreads across seeds overlap and only 3 seeds were run, so this is **not evidence of an improvement**.
+- The adaptive variant has lower accuracy than ER (65.48 ± 0.53).
+- The report's "Avg Accuracy" and "Forgetting" are *average incremental* metrics (averaged over the 5 task checkpoints). Accuracy after the last task is much lower (52.73 for ER, 56.98 for fixed VR-OCL) and is also in the tables.
+
+Earlier runs on Kaggle did not show the same effect and have weaker provenance (code version unconfirmed); they are archived in `results/archive_kaggle/` and are not used here.
+
+---
+
+# Original README (MKD-OCL, upstream)
+
 Implementation of our paper titled "Rethinking Momentum Knowledge Distillation in Online Continual Learning"
 ==========================================
 The paper has been accepted at ICML 2024.

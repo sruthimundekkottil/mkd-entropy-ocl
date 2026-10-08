@@ -49,6 +49,10 @@ class VROCLAdaptiveLearner(VROCLLearner):
     When memory accuracy is stable -> gap near zero -> mu stays
     at mu_max * 0.5 (neutral point of sigmoid).
 
+    Because combined_gap >= 0, mu always lies in [mu_max/2, mu_max]:
+    it never drops below mu_max/2. (Only the loss-gap fallback, used
+    when the memory batch has < 10 samples, can be negative.)
+
     Parameters
     ----------
     vr_mu_max   : float  maximum mu, default 0.05
@@ -207,7 +211,9 @@ class VROCLAdaptiveLearner(VROCLLearner):
 
         gap_ema = 0   -> sigmoid = 0.5 -> mu = mu_max/2 (neutral)
         gap_ema >> 0  -> sigmoid -> 1  -> mu -> mu_max  (high forgetting)
-        gap_ema << 0  -> sigmoid -> 0  -> mu -> 0       (no forgetting)
+        gap_ema << 0  -> sigmoid -> 0  -> mu -> 0
+        The last case is unreachable with the accuracy gap (always
+        >= 0), so in practice mu stays in [mu_max/2, mu_max].
         """
         sigmoid_val = 1.0 / (1.0 + np.exp(-self.gap_ema / self.vr_tau))
         return self.vr_mu_max * sigmoid_val

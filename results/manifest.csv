@@ -1,0 +1,13 @@
+path,environment,status,note
+local/baselines_vr_mu0p001_adaptive_mumax0p05_tau0p3,local,valid,"ER, EWC, VR_OCL mu=0.001, VR_OCL_Decay mu=0.001, VR_OCL_Adaptive (accuracy-gap code) mu_max=0.05 tau=0.3; formerly results_local/"
+local/vr_mu0p0005,local,valid,"VR_OCL and VR_OCL_Decay mu=0.0005; formerly results_mu0005/"
+local/adaptive_mumax0p02_tau0p5,local,valid,"VR_OCL_Adaptive (accuracy-gap code) mu_max=0.02 tau=0.5; formerly results_adaptive_v2/"
+archive_kaggle/baselines,kaggle,archive,"ER and EWC; code version unconfirmed; formerly results_extra/final_baselines/"
+archive_kaggle/vr_mu0p01,kaggle,archive,"VR_OCL and VR_OCL_Decay mu=0.01; code version unconfirmed; formerly results_extra/vrocl_final_results/"
+archive_kaggle/vr_mu0p005,kaggle,archive,"VR_OCL and VR_OCL_Decay mu=0.005; code version unconfirmed; formerly results_extra/vrocl_mu0005_results/ (folder name said 0005 but params say 0.005)"
+archive_kaggle/adaptive_v1lossgap_mumax0p05_tau0p5,kaggle,archive,"VR_OCL_Adaptive OLD loss-gap code (gap_history has no best_mem column) mu_max=0.05 tau=0.5; split out of results_extra/results_adaptive_final/"
+archive_kaggle/invalid/kaggle_results_adaptive_final_er_vr_decay,kaggle,invalid,"VR_OCL and VR_OCL_Decay acc/forgetting CSVs are byte-identical to ER for every seed: the regularizer had no effect. ER/EWC are copies of archive_kaggle/baselines."
+archive_kaggle/invalid/kaggle_vr_mu0p1_backup,kaggle,invalid,"Early mu=0.1 run with vr_mu_cap=10; superseded backup, not used in the report"
+archive_kaggle/invalid/kaggle_mem1000_mu0p001_incomplete,kaggle,invalid,"mem_size=1000 run; all_results.csv and final_summary.csv are empty (run did not finish its summary step); not used in the report"
+archive_kaggle/duplicates/kaggle_vr_mu0p01_copy1,kaggle,duplicate,"Byte-identical copy of archive_kaggle/vr_mu0p01 (formerly results_extra/vrocl_mu001_decayfix_results/.../results_vrocl)"
+archive_kaggle/duplicates/kaggle_vr_mu0p01_copy2,kaggle,duplicate,"Copy of archive_kaggle/vr_mu0p01 without the two summary CSVs (formerly .../tuned_results)"

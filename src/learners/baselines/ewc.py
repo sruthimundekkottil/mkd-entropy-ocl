@@ -19,7 +19,12 @@ Where:
 
 Key difference from VR-OCL:
   EWC  — per-parameter importance weighting (needs Fisher + task boundary)
-  VR-OCL — uniform penalty on update magnitude (needs neither)
+  VR-OCL — uniform penalty on drift from a task-start snapshot (no Fisher;
+           uses task boundaries only to refresh the snapshot)
+
+Note: _estimate_fisher() squares the gradient of each mini-batch MEAN
+loss (batch 32) rather than averaging per-sample squared gradients, so
+it is a coarser, smaller estimate of the diagonal Fisher.
 """
 
 import torch

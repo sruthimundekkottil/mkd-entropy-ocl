@@ -22,9 +22,9 @@ from src.learners.ema.pcr_ema import PCR_EMALearner
 from src.learners.er_kdu import ER_KDULearner
 from src.learners.ema.tens import TEnsLearner
 
-# ── New learners added for this project ───────────────────────────────
-from src.learners.baselines.er_entropy import ER_EntropyLearner
-from src.learners.ema.er_ema_entropy import ER_EMA_EntropyLearner
+# ── New learners added for this project (VR-OCL fork) ─────────────────
+# The entropy-replay learners live in experimental/ and register
+# themselves in experimental/run_experiments.py.
 from src.learners.baselines.vr_ocl import VROCLLearner, VROCLDecayLearner
 from src.learners.baselines.vr_ocl_adaptive import VROCLAdaptiveLearner
 from src.learners.baselines.ewc import EWCLearner
@@ -40,7 +40,6 @@ from src.buffers.mlbuf import MLBuf
 from src.buffers.indexed_reservoir import IndexedReservoir
 from src.buffers.logits_res import LogitsRes
 from src.buffers.mgi_reservoir import MGIReservoir
-from src.buffers.entropy_reservoir import EntropyReservoir
 
 
 learners = {
@@ -67,11 +66,9 @@ learners = {
     'PCR_EMA':      PCR_EMALearner,
     'ER_KDU':       ER_KDULearner,
     'TEns':         TEnsLearner,
-    # ── New ──────────────────────────────────────────────────────────
-    'ER_Entropy':       ER_EntropyLearner,       # ER + entropy replay
-    'ER_EMA_Entropy':   ER_EMA_EntropyLearner,   # ER + MKD + entropy replay
+    # ── New (VR-OCL fork) ────────────────────────────────────────────
     'VR_OCL':           VROCLLearner,            # variance regularizer fixed mu
-    'VR_OCL_Decay':     VROCLDecayLearner,       # variance regularizer decaying mu
+    'VR_OCL_Decay':     VROCLDecayLearner,       # variance regularizer, mu grows within each task
     'VR_OCL_Adaptive':  VROCLAdaptiveLearner,     # variance regularizer adaptive mu
     'EWC':              EWCLearner,              # EWC baseline
 }
@@ -87,5 +84,4 @@ buffers = {
     'mlbuf':            MLBuf,
     'idx_reservoir':    IndexedReservoir,
     'mgi_reservoir':    MGIReservoir,
-    'entropy_reservoir': EntropyReservoir,       # new
 }

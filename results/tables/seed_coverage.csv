@@ -1,0 +1,9 @@
+environment,method,config,seeds,same_seeds_as_ER
+local,ER,-,"0,1,2",True
+local,EWC,-,"0,1,2",True
+local,VR_OCL,mu=0.0005,"0,1,2",True
+local,VR_OCL,mu=0.001,"0,1,2",True
+local,VR_OCL_Decay,mu=0.0005,"0,1,2",True
+local,VR_OCL_Decay,mu=0.001,"0,1,2",True
+local,VR_OCL_Adaptive,"acc-gap, mu_max=0.02, tau=0.5","0,1,2",True
+local,VR_OCL_Adaptive,"acc-gap, mu_max=0.05, tau=0.3","0,1,2",True

@@ -1,0 +1,8 @@
+environment,method,config,seeds,same_seeds_as_ER
+kaggle,ER,-,"0,1,2",True
+kaggle,EWC,-,"0,1,2",True
+kaggle,VR_OCL,mu=0.005,"0,1,2",True
+kaggle,VR_OCL,mu=0.01,"0,1,2",True
+kaggle,VR_OCL_Decay,mu=0.005,"0,1,2",True
+kaggle,VR_OCL_Decay,mu=0.01,"0,1,2",True
+kaggle,VR_OCL_Adaptive,"loss-gap, mu_max=0.05, tau=0.5","0,1,2",True

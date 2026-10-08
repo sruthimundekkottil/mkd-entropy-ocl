@@ -140,3 +140,9 @@ dmypy.json
 *.pth
 notebooks/ICIP/
 sweeps/csv/
+
+# VR-OCL fork: datasets are downloaded by torchvision, never committed
+/data/
+desktop.ini
+data/
+desktop.ini

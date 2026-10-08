@@ -15,23 +15,25 @@ where mu_n = mu * beta^{-n} grows over time since beta < 1.
 
 OCL Translation
 ---------------
-In OCL, Delta_n = theta_t - theta_{t-1} is the parameter update at
-step t. Penalizing ||Delta_n||^2 prevents the model from drifting too
-far from its previous state, which directly reduces catastrophic
-forgetting.
+The lemma regularizes the step-wise update theta_t - theta_{t-1}.
+Here we instead penalize the cumulative drift from a snapshot taken
+at the start of each task, theta - theta_prev, on the hypothesis that
+limiting drift reduces catastrophic forgetting (tested empirically,
+not implied by the lemma).
 
 Unlike EWC (Kirkpatrick et al. 2017), this requires:
   - No Fisher information matrix computation
-  - No task boundary information
   - No per-parameter importance estimation
+It does use the benchmark's task boundaries (the task_id passed to
+train()) to decide when to refresh the snapshot.
 
-Fix log (v2)
-------------
-Added assertions and debug prints to verify the regularizer is
-activating. Previous runs showed ER, VR_OCL, VR_OCL_Decay producing
-identical results, indicating the penalty was not being applied.
-Root cause: mu=0.001 with float16 mixed precision caused the penalty
-to round to zero. Fixed by computing penalty in float32 explicitly.
+Debug notes
+-----------
+Assertions and debug prints check that the regularizer is active.
+Earlier runs produced VR_OCL / VR_OCL_Decay results identical to ER.
+That was attributed to float16 underflow, but training here does not use
+autocast (only ERLearner.evaluate/encode do), so the cause is
+unconfirmed. The penalty is still computed in float32; this is harmless.
 """
 
 import torch
@@ -104,10 +106,9 @@ class VROCLLearner(ERLearner):
         """
         Compute (mu/2) * ||theta - theta_prev||^2
 
-        Computed in float32 explicitly to prevent the penalty from
-        rounding to zero under float16 mixed precision training.
-        Small mu values (0.001) with float16 can underflow to zero,
-        which caused VR_OCL to be identical to ER in earlier runs.
+        Computed in float32 explicitly so the penalty cannot underflow
+        if the model is ever run under float16 autocast (training in
+        this repo is float32, so this is a safeguard only).
         """
         if self.prev_params is None:
             return torch.tensor(0.0, device=device)
@@ -227,6 +228,11 @@ class VROCLDecayLearner(VROCLLearner):
     vr_mu as training progresses within the task. Capped at vr_mu_cap.
 
     Resets at each task boundary so earlier tasks are not over-penalized.
+
+    Notes: despite the class name, mu GROWS within a task. This is a
+    saturating schedule bounded by vr_mu, not the unbounded
+    mu * beta^(-n) of Theorem 4.2. With beta=0.99 it reaches 99% of
+    vr_mu after ~460 steps, and vr_mu_cap only matters if vr_mu > vr_mu_cap.
     """
 
     def __init__(self, args):
