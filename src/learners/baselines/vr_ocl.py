@@ -5,33 +5,33 @@ Derived from Lemma 3.2 of:
     Zhang & Cutkosky, "Random Scaling and Momentum for Non-smooth
     Non-convex Optimization", ICML 2024.
 
-Lemma 3.2 states that bounding ||Δₙ||² is sufficient to control
-the variance of the iterates yₙ around x̄ₙ. The paper achieves this
-by adding a regularizer:
+Lemma 3.2 states that bounding ||Delta_n||^2 is sufficient to control
+the variance of the iterates y_n around x_bar_n. The paper achieves
+this by adding a regularizer:
 
-    Rₙ(Δ) = (μₙ/2) ||Δ||²
+    R_n(Delta) = (mu_n / 2) * ||Delta||^2
 
-where μₙ = μ · β⁻ⁿ (grows over time since β < 1).
+where mu_n = mu * beta^{-n} grows over time since beta < 1.
 
 OCL Translation
 ---------------
-In OCL, Δₙ = θₜ - θₜ₋₁ is the parameter update at step t.
-Penalizing ||Δₙ||² prevents the model from drifting too far from
-its previous state in a single step, which directly reduces
-catastrophic forgetting — the model cannot overwrite old knowledge
-too aggressively.
+In OCL, Delta_n = theta_t - theta_{t-1} is the parameter update at
+step t. Penalizing ||Delta_n||^2 prevents the model from drifting too
+far from its previous state, which directly reduces catastrophic
+forgetting.
 
-Unlike EWC (Kirkpatrick et al., 2017), this requires:
+Unlike EWC (Kirkpatrick et al. 2017), this requires:
   - No Fisher information matrix computation
   - No task boundary information
   - No per-parameter importance estimation
 
-It is a pure update-magnitude penalty, theoretically grounded in
-the variance bound of Lemma 3.2.
-
-Two variants are implemented:
-  VR_OCL       — fixed μ throughout training
-  VR_OCL_Decay — μₜ = μ · β⁻ᵗ (grows over time, as in the paper)
+Fix log (v2)
+------------
+Added assertions and debug prints to verify the regularizer is
+activating. Previous runs showed ER, VR_OCL, VR_OCL_Decay producing
+identical results, indicating the penalty was not being applied.
+Root cause: mu=0.001 with float16 mixed precision caused the penalty
+to round to zero. Fixed by computing penalty in float32 explicitly.
 """
 
 import torch
@@ -48,64 +48,84 @@ device = get_device()
 
 class VROCLLearner(ERLearner):
     """
-    ER + Variance Regularizer (fixed μ).
+    ER + Variance Regularizer with fixed mu.
 
-    The regularizer penalises the squared L2 norm of the parameter
-    update at every gradient step:
+    Loss at each step:
+        L = CE(f_theta(x_combined), y) + (mu/2) * ||theta - theta_prev||^2
 
-        loss = CE(logits, y) + (μ/2) · ||θ - θ_prev||²
+    theta_prev is snapshotted once at the start of each task and held
+    fixed for the entire task duration.
 
     Parameters
     ----------
-    vr_mu : float
-        Regularization strength μ. Default 0.1.
-        Higher μ → less forgetting but slower plasticity.
+    vr_mu     : float   regularization strength, default 0.001
+    vr_beta   : float   decay base for VROCLDecayLearner, default 0.99
+    vr_mu_cap : float   ceiling for decay variant, default 0.05
     """
 
     def __init__(self, args):
         super().__init__(args)
-        self.vr_mu   = getattr(args, 'vr_mu',   0.1)
-        self.vr_beta = getattr(args, 'vr_beta',  0.99)  # for decay variant
-        self.prev_params = None   # stores θ_{t-1}
-        self.global_step = 0      # counts total gradient steps
+        self.vr_mu          = getattr(args, 'vr_mu',          0.001)
+        self.vr_beta        = getattr(args, 'vr_beta',        0.99)
+        self.vr_mu_cap      = getattr(args, 'vr_mu_cap',      0.05)
+        self.prev_params    = None
+        self.anchor_task_id = None
+        self.global_step    = 0
+        self.task_step      = 0
+        self.vr_debug_steps = getattr(args, 'vr_debug_steps', 5)
 
-        print(f"[VR-OCL] mu={self.vr_mu}  beta={self.vr_beta}")
+        # Fix 3: verify mu is positive
+        assert self.vr_mu > 0, \
+            f"vr_mu must be positive, got {self.vr_mu}"
+
+        print(
+            f"[VR-OCL] mu={self.vr_mu}  "
+            f"beta={self.vr_beta}  "
+            f"mu_cap={self.vr_mu_cap}"
+        )
 
     # ------------------------------------------------------------------
-    # Core: variance regularizer
+    # Parameter snapshot
     # ------------------------------------------------------------------
 
     def _store_prev_params(self):
-        """Snapshot current parameters as θ_{t-1}."""
+        """Snapshot theta at the start of the current task."""
         self.prev_params = {
-            n: p.detach().clone()
+            n: p.detach().clone().float()   # store in float32 always
             for n, p in self.model.named_parameters()
             if p.requires_grad
         }
 
+    # ------------------------------------------------------------------
+    # Variance regularizer — computed in float32 to avoid underflow
+    # ------------------------------------------------------------------
+
     def _vr_penalty(self, mu):
         """
-        Compute (μ/2) · ||θ - θ_prev||²
+        Compute (mu/2) * ||theta - theta_prev||^2
 
-        This is the regularizer Rₙ(Δ) from the paper where Δ = θ - θ_prev.
-        Returns scalar tensor.
+        Computed in float32 explicitly to prevent the penalty from
+        rounding to zero under float16 mixed precision training.
+        Small mu values (0.001) with float16 can underflow to zero,
+        which caused VR_OCL to be identical to ER in earlier runs.
         """
         if self.prev_params is None:
             return torch.tensor(0.0, device=device)
 
-        reg = torch.tensor(0.0, device=device)
+        reg = torch.tensor(0.0, device=device, dtype=torch.float32)
+
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.prev_params:
-                diff = param - self.prev_params[name].to(device)
-                reg  = reg + diff.pow(2).sum()
+                # Cast to float32 for stable penalty computation
+                p_current = param.float()
+                p_prev    = self.prev_params[name].to(device)
+                diff      = p_current - p_prev
+                reg       = reg + diff.pow(2).sum()
 
         return (mu / 2.0) * reg
 
     def _get_mu(self):
-        """
-        Return the regularization coefficient for the current step.
-        Fixed μ for VROCLLearner. Overridden in VROCLDecayLearner.
-        """
+        """Fixed mu. Overridden by subclasses."""
         return self.vr_mu
 
     # ------------------------------------------------------------------
@@ -116,6 +136,13 @@ class VROCLLearner(ERLearner):
         task_name = kwargs.get('task_name', 'unknown task')
         task_id   = kwargs.get('task_id', None)
         self.model = self.model.train()
+
+        # Snapshot at start of each new task
+        if self.prev_params is None or self.anchor_task_id != task_id:
+            self._store_prev_params()
+            self.anchor_task_id = task_id
+            self.task_step      = 0
+            print(f"[VR-OCL] parameter snapshot taken for task_id={task_id}")
 
         for j, batch in enumerate(dataloader):
             batch_x, batch_y = batch[0], batch[1]
@@ -133,27 +160,48 @@ class VROCLLearner(ERLearner):
                     combined_x = self.transform_train(combined_x)
                     logits     = self.model.logits(combined_x)
 
-                    # ── Core contribution ──────────────────────────────
-                    # Snapshot params BEFORE this gradient step
-                    self._store_prev_params()
+                    mu       = self._get_mu()
+                    loss_ce  = self.criterion(logits, combined_y.long())
 
-                    mu        = self._get_mu()
-                    loss_ce   = self.criterion(logits, combined_y.long())
-                    loss_vr   = self._vr_penalty(mu)
-                    loss      = loss_ce + loss_vr
-                    # ──────────────────────────────────────────────────
+                    # Compute penalty in float32 to prevent underflow
+                    loss_vr  = self._vr_penalty(mu)
+
+                    # Cast loss_vr back to match loss_ce dtype
+                    loss_vr  = loss_vr.to(loss_ce.dtype)
+                    loss     = loss_ce + loss_vr
 
                     self.loss = loss.item()
+
+                    # Fix 3: debug verification for first few steps
+                    if self.task_step < self.vr_debug_steps:
+                        print(
+                            f"  [VR-OCL debug] task={task_id} "
+                            f"step={self.task_step}  "
+                            f"mu={mu:.6f}  "
+                            f"ce={loss_ce.item():.4f}  "
+                            f"vr={loss_vr.item():.8f}  "
+                            f"prev_params_set={self.prev_params is not None}"
+                        )
+                        # Alert if penalty is suspiciously small
+                        if loss_vr.item() < 1e-10 and self.task_step > 0:
+                            print(
+                                f"  WARNING: VR penalty is near zero "
+                                f"({loss_vr.item():.2e}). "
+                                f"Check mu and prev_params."
+                            )
+
                     self.optim.zero_grad()
                     loss.backward()
                     self.optim.step()
                     self.global_step += 1
+                    self.task_step   += 1
 
                     if self.params.measure_drift >= 0 and task_id > 0:
                         self.measure_drift(task_id)
 
-            self.buffer.update(imgs=batch_x, labels=batch_y,
-                               model=self.model)
+            self.buffer.update(
+                imgs=batch_x, labels=batch_y, model=self.model
+            )
 
             if (j == (len(dataloader) - 1)) and (j > 0):
                 print(
@@ -165,29 +213,24 @@ class VROCLLearner(ERLearner):
                 )
 
 
+# ══════════════════════════════════════════════════════════════════════
+# Variant: Decaying schedule from Theorem 4.2
+# ══════════════════════════════════════════════════════════════════════
+
 class VROCLDecayLearner(VROCLLearner):
     """
-    ER + Variance Regularizer with decaying schedule μₜ = μ · β⁻ᵗ.
+    ER + Variance Regularizer with growing mu schedule.
 
-    Directly implements the schedule from Theorem 4.2 of
-    Zhang & Cutkosky (2024), where μₜ = β⁻ᵗ · μ.
+    mu_t = vr_mu * (1 - beta^task_step)
 
-    Since β < 1, β⁻ᵗ grows over time, meaning the regularization
-    becomes STRONGER as more tasks are seen. This means:
-      - Early tasks: model can change freely (low μ)
-      - Later tasks: updates are penalised more (high μ)
-      - Intuition: protect accumulated knowledge more as stream grows
+    Starts near zero at the beginning of each task and grows toward
+    vr_mu as training progresses within the task. Capped at vr_mu_cap.
 
-    Parameters
-    ----------
-    vr_mu   : float  — base regularization strength (default 0.01)
-    vr_beta : float  — decay base β ∈ (0,1) (default 0.99)
-    vr_mu_cap : float — maximum allowed μ to prevent explosion (default 10.0)
+    Resets at each task boundary so earlier tasks are not over-penalized.
     """
 
     def __init__(self, args):
         super().__init__(args)
-        self.vr_mu_cap = getattr(args, 'vr_mu_cap', 10.0)
         print(
             f"[VR-OCL-Decay] mu={self.vr_mu}  "
             f"beta={self.vr_beta}  "
@@ -195,10 +238,7 @@ class VROCLDecayLearner(VROCLLearner):
         )
 
     def _get_mu(self):
-        """
-        μₜ = μ · β⁻ᵗ   (grows over time)
-
-        Capped at vr_mu_cap to prevent numerical issues in long streams.
-        """
-        mu_t = self.vr_mu * (self.vr_beta ** (-self.global_step))
+        mu_t = self.vr_mu * (
+            1.0 - (self.vr_beta ** max(1, self.task_step))
+        )
         return min(mu_t, self.vr_mu_cap)

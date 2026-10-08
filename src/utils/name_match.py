@@ -26,6 +26,7 @@ from src.learners.ema.tens import TEnsLearner
 from src.learners.baselines.er_entropy import ER_EntropyLearner
 from src.learners.ema.er_ema_entropy import ER_EMA_EntropyLearner
 from src.learners.baselines.vr_ocl import VROCLLearner, VROCLDecayLearner
+from src.learners.baselines.vr_ocl_adaptive import VROCLAdaptiveLearner
 from src.learners.baselines.ewc import EWCLearner
 # ──────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ learners = {
     'ER_EMA_Entropy':   ER_EMA_EntropyLearner,   # ER + MKD + entropy replay
     'VR_OCL':           VROCLLearner,            # variance regularizer fixed mu
     'VR_OCL_Decay':     VROCLDecayLearner,       # variance regularizer decaying mu
+    'VR_OCL_Adaptive':  VROCLAdaptiveLearner,     # variance regularizer adaptive mu
     'EWC':              EWCLearner,              # EWC baseline
 }
 
